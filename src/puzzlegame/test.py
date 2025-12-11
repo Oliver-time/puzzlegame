@@ -3,172 +3,300 @@
 import os
 import torch
 import numpy as np
+import random
+import time
 
+# 添加项目路径
+import sys
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+sys.path.append(PROJECT_ROOT)
 
 from puzzlegame.core.environment import PuzzleGame
-from puzzlegame.algorithms.behavioral_cloning import PuzzleNet
+from puzzlegame.algorithms.behavioral_cloning import PuzzleNetFeatureBased
 
-def process_state(raw_state):
-    # ... (保持之前的处理逻辑不变，确保维度为24) ...
-    processed = []
-    if isinstance(raw_state, dict):
-        for value in raw_state.values():
-            if isinstance(value, (list, np.ndarray)):
-                processed.extend(value)
-            else:
-                processed.append(value)
-    elif isinstance(raw_state, (list, np.ndarray)):
-        processed = list(raw_state)
-    else:
-        processed = [raw_state]
-
-    processed = np.array(processed)
-    flat_state = processed.ravel()
-    
-    # 假设训练维度是24
-    expected_dim = 24
-    if flat_state.size > expected_dim:
-        return flat_state[:expected_dim]
-    elif flat_state.size < expected_dim:
-        padded = np.zeros(expected_dim)
-        padded[:flat_state.size] = flat_state
-        return padded
-    return flat_state
-
-def display_game_info(env, current_pos, target_pos):
-    """显示游戏任务的具体情况"""
-    print(f"\n{'='*60}")
-    print(f"📊 任务详情:")
-    print(f"  拼图总长度 (n): {env.n}")
-    print(f"  拼图块长度 (m): {env.m}")
-    print(f"  当前拼图位置: {current_pos}")
-    print(f"  目标位置: {target_pos}")
-    print(f"  距离目标: {abs(current_pos - target_pos)} 步")
-    print(f"  拼图块值: {env.puzzle_piece}")
-    
-    # 显示简化的游戏状态
-    display = []
-    for i in range(env.n):
-        # 检查是否是目标区域
-        is_target = target_pos <= i < target_pos + env.m
-        # 检查当前是否有拼图块
-        has_puzzle = current_pos <= i < current_pos + env.m
-        
-        if has_puzzle and is_target:
-            display.append('[🎯]')  # 正确位置
-        elif has_puzzle:
-            display.append('[🧩]')  # 拼图块
-        elif is_target:
-            display.append('[⬜]')  # 目标缺口
-        else:
-            display.append(' . ')   # 空位置
-            
-    print(f"\n  游戏状态:")
-    print(f"  {' '.join(display[:min(30, len(display))])}")
-    if env.n > 30:
-        print(f"  ... (共{env.n}个位置)")
-    print(f"{'='*60}\n")
-
-def main():
-    # --- ✅ 修改：指向新训练的加权模型 ---
-    model_path = os.path.join(CURRENT_DIR, "data", "models", "bc_model_weighted.pth")
+def load_model():
+    """加载模型"""
+    model_path = os.path.join(CURRENT_DIR, "data", "models", "bc_model_feature_based.pth")
     
     if not os.path.exists(model_path):
         print(f"❌ 错误: 找不到模型文件: {model_path}")
-        print("请先运行 train_bc.py 生成模型")
-        return
-
-    model = PuzzleNet(input_dim=24, hidden_dim=128, output_dim=3)
+        return None
+    
+    print(f"✅ 加载模型: {model_path}")
+    
+    model = PuzzleNetFeatureBased(
+        bg_dim=20, 
+        puzzle_dim=3, 
+        pos_dim=1,
+        feature_dim=8,
+        hidden_dim=128, 
+        output_dim=3
+    )
+    
     model.load_state_dict(torch.load(model_path))
     model.eval()
-    print(f"✅ 加载加权模型成功: {model_path}")
+    return model
 
+def state_to_tensor(obs):
+    """将观测转换为模型输入张量"""
+    if isinstance(obs, dict):
+        # 构建与训练时相同的状态向量
+        background = obs['background'] / 100.0
+        puzzle = obs['puzzle'] / 100.0
+        current_pos = np.array([obs['current_pos'] / 20.0])  # n=20
+        
+        state_vec = np.concatenate([background, puzzle, current_pos])
+        return torch.FloatTensor(state_vec).unsqueeze(0)
+    else:
+        return torch.FloatTensor(obs).unsqueeze(0)
+
+def get_model_prediction(model, state_tensor):
+    """获取模型预测，处理返回元组的情况"""
+    with torch.no_grad():
+        result = model(state_tensor)
+        
+        # 检查返回类型
+        if isinstance(result, tuple):
+            outputs, _ = result  # 特征提炼网络返回 (outputs, attention)
+        else:
+            outputs = result  # 简单网络只返回 outputs
+        
+        action_idx = torch.argmax(outputs, dim=1).item()
+        return action_idx
+
+def test_complete_games(model, num_games=50, max_steps=50):
+    """测试完整游戏"""
+    print(f"\n🎮 开始完整游戏测试 ({num_games}局)")
+    
     env = PuzzleGame(n=20, m=3)
-    raw_state = env.reset() 
+    success_count = 0
+    failed_games = []
+    total_steps_list = []
     
-    # 获取初始状态信息
-    if isinstance(raw_state, dict):
-        current_pos = raw_state.get('current_pos', 0)
-        target_pos = raw_state.get('target_pos', 0)
-    else:
-        current_pos = 0
-        target_pos = env.target_pos if hasattr(env, 'target_pos') else 0
+    for game_idx in range(num_games):
+        obs = env.reset()
+        done = False
+        steps = 0
+        game_history = []
+        
+        while not done and steps < max_steps:
+            # 模型预测
+            state_tensor = state_to_tensor(obs)
+            action_idx = get_model_prediction(model, state_tensor)
+            
+            # 执行动作
+            obs, reward, done, _ = env.step(action_idx)
+            steps += 1
+            
+            # 记录游戏过程
+            game_history.append({
+                'step': steps,
+                'action': action_idx,
+                'current_pos': obs['current_pos'],
+                'target_pos': obs['target_pos'],
+                'reward': reward
+            })
+        
+        # 检查结果
+        success = (reward > 0)
+        if success:
+            success_count += 1
+            total_steps_list.append(steps)
+        else:
+            failed_games.append({
+                'game_idx': game_idx,
+                'steps': steps,
+                'final_pos': obs['current_pos'],
+                'target_pos': obs['target_pos'],
+                'history': game_history
+            })
     
-    print(f"🎮 开始游戏测试...")
-    print(f"🔧 环境设置: n={env.n}, m={env.m}")
-    print(f"🎯 任务目标: 将拼图块移动到目标位置 {target_pos}")
+    # 输出统计
+    success_rate = success_count / num_games * 100
+    print(f"📊 完整游戏测试结果:")
+    print(f"  成功局数: {success_count}/{num_games}")
+    print(f"  成功率: {success_rate:.1f}%")
     
-    # 显示初始任务情况
-    display_game_info(env, current_pos, target_pos)
+    if success_count > 0:
+        avg_steps = np.mean(total_steps_list)
+        print(f"  平均成功步数: {avg_steps:.1f}")
+    
+    return success_rate, failed_games
 
-    done = False
-    step = 0
-    total_reward = 0
+def display_failed_game(failed_games):
+    """展示一局失败的游戏过程"""
+    if not failed_games:
+        print("\n🎉 没有失败的游戏！")
+        return
     
-    while not done:
-        step += 1
-        processed_state = process_state(raw_state)
-        state_tensor = torch.FloatTensor(processed_state).unsqueeze(0)
+    game = random.choice(failed_games)  # 随机选择一局失败游戏
+    
+    print(f"\n🔍 随机展示失败游戏 #{game['game_idx']}:")
+    print(f"  最终位置: {game['final_pos']}")
+    print(f"  目标位置: {game['target_pos']}")
+    print(f"  总步数: {game['steps']}")
+    
+    # 展示关键步骤
+    print(f"\n📋 游戏过程关键步骤:")
+    
+    # 只展示开始、中间和结束的步骤
+    history = game['history']
+    if len(history) > 0:
+        display_indices = [0, len(history)//4, len(history)//2, 3*len(history)//4, -1]
+        display_indices = [i for i in display_indices if 0 <= i < len(history)]
         
-        with torch.no_grad():
-            logits = model(state_tensor)
-            action_idx = torch.argmax(logits, dim=1).item()
-            action_probs = torch.softmax(logits, dim=1)[0].numpy()
+        for idx in display_indices:
+            step_info = history[idx]
+            action_names = ["←左移", "→右移", "✓确认"]
+            
+            print(f"  步骤{step_info['step']:2d}: {action_names[step_info['action']]} "
+                  f"| 位置:{step_info['current_pos']:2d} "
+                  f"| 目标:{step_info['target_pos']:2d} "
+                  f"| 距离:{abs(step_info['current_pos'] - step_info['target_pos']):2d}")
+    
+    # 显示最终状态可视化
+    print(f"\n🎯 最终状态:")
+    display = []
+    for i in range(20):
+        is_target = game['target_pos'] <= i < game['target_pos'] + 3
+        is_current = game['final_pos'] <= i < game['final_pos'] + 3
         
-        # 动作映射
-        action_map = {0: "← 左移", 1: "→ 右移", 2: "✓ 确认放置"}
-        action_name = action_map.get(action_idx, f"未知动作 {action_idx}")
-        
-        # 执行环境步进
-        result = env.step(action_idx)
-        if len(result) == 4:
-            raw_state, reward, done, info = result
-        elif len(result) == 5:
-            raw_state, reward, done, _, info = result
-        
-        total_reward += reward
-        
-        # 获取当前位置
-        if isinstance(raw_state, dict):
-            current_pos = raw_state.get('current_pos', current_pos)
-            target_pos = raw_state.get('target_pos', target_pos)
-        
-        print(f"\n📋 Step {step}:")
-        print(f"  🤖 模型决策: {action_name} (置信度: {action_probs[action_idx]:.3f})")
-        print(f"  🏆 即时奖励: {reward:.1f}")
-        print(f"  📍 当前位置: {current_pos}")
-        print(f"  🎯 目标位置: {target_pos}")
-        print(f"  📏 剩余距离: {abs(current_pos - target_pos)}")
-        
-        # 每5步显示一次详细状态
-        if step % 5 == 0 or done:
-            display_game_info(env, current_pos, target_pos)
-        
-        # 步数上限设为50
-        if step >= 50:
-            print(f"\n⚠️  超过最大步数限制（50步）")
-            print(f"📊 统计: 总步数={step}, 总奖励={total_reward}")
-            done = True
-            break
+        if is_current and is_target:
+            display.append('[🎯]')
+        elif is_current:
+            display.append('[🧩]')
+        elif is_target:
+            display.append('[⬜]')
+        else:
+            display.append(' . ')
+    
+    print(f"  {' '.join(display)}")
+    print(f"  当前位置: {game['final_pos']}, 目标位置: {game['target_pos']}")
 
-    # 最终结果
-    print(f"\n{'='*60}")
-    print(f"🎯 任务完成情况:")
-    if reward > 0:
-        print(f"  ✅ 成功！拼图块已正确放置到目标位置")
-        print(f"  🎉 最终奖励: {reward}")
-    else:
-        print(f"  ❌ 失败！未能在目标位置放置拼图块")
-        print(f"  📍 当前位置: {current_pos}, 目标位置: {target_pos}")
+def test_on_expert_data(model, num_samples=50):
+    """在专家数据上测试模型准确率"""
+    print(f"\n📚 加载专家数据进行测试 ({num_samples}个样本)")
     
-    print(f"  📊 统计:")
-    print(f"    总步数: {step}")
-    print(f"    总奖励: {total_reward}")
-    print(f"    最终位置: {current_pos}")
-    print(f"    目标位置: {target_pos}")
-    print(f"    准确度: {'正确' if current_pos == target_pos else '错误'}")
-    print(f"{'='*60}")
+    # 加载专家数据
+    data_path = os.path.join(CURRENT_DIR, "data", "raw", "expert_demos.npz")
+    
+    if not os.path.exists(data_path):
+        print(f"❌ 错误: 找不到专家数据文件: {data_path}")
+        return 0
+    
+    data = np.load(data_path)
+    states = data['states']
+    actions = data['actions']
+    
+    print(f"  找到专家数据: {len(states)} 个样本")
+    
+    # 随机选择样本
+    if len(states) > num_samples:
+        indices = random.sample(range(len(states)), num_samples)
+        test_states = states[indices]
+        test_actions = actions[indices]
+    else:
+        test_states = states
+        test_actions = actions
+    
+    # 测试
+    correct = 0
+    total = len(test_states)
+    
+    model.eval()
+    for i in range(total):
+        state_tensor = torch.FloatTensor(test_states[i]).unsqueeze(0)
+        
+        # 使用统一的预测函数
+        predicted = get_model_prediction(model, state_tensor)
+        
+        if predicted == int(test_actions[i]):
+            correct += 1
+    
+    accuracy = correct / total * 100
+    print(f"📊 专家数据测试结果:")
+    print(f"  测试样本数: {total}")
+    print(f"  正确预测数: {correct}")
+    print(f"  准确率: {accuracy:.1f}%")
+    
+    # 显示一些错误样本
+    if accuracy < 100 and correct < total:
+        print(f"\n🔍 错误样本分析 (显示3个):")
+        error_count = 0
+        for i in range(total):
+            if error_count >= 3:
+                break
+                
+            state_tensor = torch.FloatTensor(test_states[i]).unsqueeze(0)
+            predicted = get_model_prediction(model, state_tensor)
+            
+            if predicted != int(test_actions[i]):
+                # 解析状态
+                bg_values = test_states[i][:20] * 100
+                puzzle_values = test_states[i][20:23] * 100
+                current_pos = int(test_states[i][23] * 20)
+                
+                # 找到缺口位置
+                gap_positions = []
+                for pos in range(20):
+                    if bg_values[pos] < 100:
+                        gap_positions.append(pos)
+                
+                action_names = ["左移", "右移", "确认"]
+                print(f"  样本{i}:")
+                print(f"    当前位置: {current_pos}")
+                print(f"    缺口位置: {gap_positions}")
+                print(f"    专家动作: {action_names[int(test_actions[i])]}")
+                print(f"    模型预测: {action_names[predicted]}")
+                error_count += 1
+    
+    return accuracy
+
+def main():
+    print("🧪 开始模型测试")
+    print("=" * 50)
+    
+    # 加载模型
+    model = load_model()
+    if model is None:
+        return
+    
+    start_time = time.time()
+    
+    try:
+        # 测试1: 完整游戏测试
+        success_rate, failed_games = test_complete_games(model, num_games=50)
+        
+        # 展示一局失败的游戏
+        display_failed_game(failed_games)
+        
+        # 测试2: 专家数据测试
+        expert_accuracy = test_on_expert_data(model, num_samples=50)
+        
+        # 总结
+        total_time = time.time() - start_time
+        
+        print(f"\n" + "=" * 50)
+        print(f"📈 测试总结:")
+        print(f"  完整游戏成功率: {success_rate:.1f}%")
+        print(f"  专家数据准确率: {expert_accuracy:.1f}%")
+        print(f"  测试总用时: {total_time:.1f}秒")
+        
+        # 性能评估
+        if success_rate >= 80 and expert_accuracy >= 80:
+            print(f"  ✅ 模型性能优秀")
+        elif success_rate >= 60 and expert_accuracy >= 60:
+            print(f"  ⚠️  模型性能良好")
+        elif success_rate >= 40 or expert_accuracy >= 40:
+            print(f"  ⚠️  模型性能一般")
+        else:
+            print(f"  ❌ 模型性能较差，需要改进")
+        
+    except Exception as e:
+        print(f"\n❌ 测试过程中出错: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

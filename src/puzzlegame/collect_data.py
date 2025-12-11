@@ -19,7 +19,7 @@ def main():
     
     print("🚀 开始收集专家数据...")
     states, actions = expert.generate_demonstrations(
-        num_episodes=100,      # 生成100局游戏的数据
+        num_episodes=1000,      # 生成100局游戏的数据
         save_path=save_path
     )
     

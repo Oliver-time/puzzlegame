@@ -19,7 +19,7 @@ from puzzlegame.algorithms.behavioral_cloning import train_bc_model
 def main():
     # --- ✅ 修改：指向新训练的加权模型 ---
     data_path = os.path.join(PROJECT_ROOT, "data", "raw", "expert_demos.npz")
-    model_save_path = os.path.join(PROJECT_ROOT, "data", "models", "bc_model_weighted.pth")
+    model_save_path = os.path.join(PROJECT_ROOT, "data", "models", "bc_model_feature_based.pth")
     
     # 训练参数
     n_epochs = 100
