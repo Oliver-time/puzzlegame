@@ -22,7 +22,7 @@ def main():
     model_save_path = os.path.join(PROJECT_ROOT, "data", "models", "bc_model_feature_based.pth")
     
     # 训练参数
-    n_epochs = 100
+    n_epochs = 2
     batch_size = 64
     learning_rate = 1e-3
     
