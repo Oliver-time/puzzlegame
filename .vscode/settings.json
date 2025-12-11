@@ -1,0 +1,14 @@
+{
+    "python.analysis.extraPaths": [
+        "./src",
+        "${workspaceFolder}/src"
+    ],
+    "python.autoComplete.extraPaths": [
+        "./src",
+        "${workspaceFolder}/src"
+    ],
+    "python.analysis.diagnosticMode": "workspace",
+    "python.analysis.indexing": true,
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": true
+}
