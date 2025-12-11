@@ -1,6 +1,5 @@
 # src/puzzlegame/collect_data.py
 
-
 import os
 # ✅ 严格使用绝对导入 (按照你的要求)
 from puzzlegame.core.environment import PuzzleGame
@@ -20,7 +19,7 @@ def main():
     
     print("🚀 开始收集专家数据...")
     states, actions = expert.generate_demonstrations(
-        num_episodes=100,      # 生成1000局游戏的数据
+        num_episodes=100,      # 生成100局游戏的数据
         save_path=save_path
     )
     

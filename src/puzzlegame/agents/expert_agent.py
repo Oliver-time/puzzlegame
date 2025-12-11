@@ -2,7 +2,7 @@
 
 import numpy as np
 import random
-from ..core.environment import PuzzleGame
+from puzzlegame.core.environment import PuzzleGame
 
 class ExpertAgent:
     def __init__(self, env):
@@ -14,11 +14,11 @@ class ExpertAgent:
         target_pos = obs['target_pos']
 
         if current_pos < target_pos:
-            return 1 # 右移
+            return 1  # 右移
         elif current_pos > target_pos:
-            return 0 # 左移
+            return 0  # 左移
         else:
-            return 2 # 确认
+            return 2  # 确认
 
     def generate_demonstrations(self, num_episodes=100, save_path=None):
         """
@@ -30,6 +30,9 @@ class ExpertAgent:
         # 用于存储所有状态和动作
         all_states = []
         all_actions = []
+        
+        # 动作计数器
+        action_counts = {0: 0, 1: 0, 2: 0}  # 0:左移, 1:右移, 2:确认
 
         for episode in range(num_episodes):
             obs = self.env.reset()
@@ -37,6 +40,9 @@ class ExpertAgent:
 
             while not done:
                 action = self.get_action(obs)
+                
+                # 更新动作计数
+                action_counts[action] += 1
                 
                 # 获取下一个状态 (为了构建状态向量)
                 next_obs, reward, done, _ = self.env.step(action)
@@ -61,6 +67,14 @@ class ExpertAgent:
         # 转换为 NumPy 数组
         all_states = np.array(all_states)
         all_actions = np.array(all_actions)
+
+        # --- 显示动作统计 ---
+        total_actions = len(all_actions)
+        print(f"\n📊 动作统计:")
+        print(f"  左移 (动作0): {action_counts[0]} 次")
+        print(f"  右移 (动作1): {action_counts[1]} 次")
+        print(f"  确认 (动作2): {action_counts[2]} 次")
+        print(f"  总计: {total_actions} 次")
 
         # --- 保存数据 ---
         if save_path:
