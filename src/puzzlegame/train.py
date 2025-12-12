@@ -15,8 +15,9 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(os.path.dirname(CURRENT_DIR), 'puzzlegame')
 
 from puzzlegame.algorithms.behavioral_cloning import train_bc_model
+from puzzlegame.algorithms.behavioral_cloning import train_simple_model
 
-def main():
+def train_bc():
     # --- ✅ 修改：指向新训练的加权模型 ---
     data_path = os.path.join(PROJECT_ROOT, "data", "raw", "expert_demos.npz")
     model_save_path = os.path.join(PROJECT_ROOT, "data", "models", "bc_model_feature_based.pth")
@@ -35,5 +36,23 @@ def main():
         lr=learning_rate
     )
 
+def train_easy():
+    data_path = os.path.join(PROJECT_ROOT, "data", "raw", "easy_demos.npz")
+    model_save_path = os.path.join(PROJECT_ROOT, "data", "models", "easy_model.pth")
+    
+    # 训练参数
+    n_epochs = 100
+    batch_size = 32
+    learning_rate = 1e-3
+    
+    # 调用训练函数
+    train_simple_model(
+        data_path=data_path,
+        model_save_path=model_save_path,
+        n_epochs=n_epochs,
+        batch_size=batch_size,
+        lr=learning_rate,
+    )
+
 if __name__ == "__main__":
-    main()
+    train_easy()

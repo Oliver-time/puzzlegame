@@ -217,3 +217,78 @@ def visualize_attention(model, sample_batch):
         print(f"  背景值: {sample_batch[i, :20].numpy().round(2)}")
         print(f"  注意力: {attention.round(3)}")
         print(f"  重点关注位置: {np.where(attention > 0.1)[0]}")
+
+class SimpleNet(nn.Module):
+    def __init__(self, input_dim=2, middle_dim=32, output_dim=3):
+        super(SimpleNet, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, middle_dim),
+            nn.ReLU(),
+            nn.Linear(middle_dim, output_dim)
+        )
+    def forward(self, x):
+        return self.network(x)
+
+def train_simple_model(data_path, model_save_path, n_epochs=100, batch_size=32, lr=1e-3):
+    """训练简单模型"""
+    print("🚀 开始训练简单模型...")
+    print(f"📁 读取数据: {os.path.abspath(data_path)}")
+    
+    # --- 数据加载 ---
+    data = np.load(data_path)
+    states = data['states']
+    actions = data['actions']
+    
+    print(f"📊 数据加载完成，共 {len(states)} 条数据。")
+    
+    input_dim = 2
+    output_dim = 3
+    
+    print(f"🧠 输入维度: {input_dim}")
+    
+    # --- 模型初始化 ---
+    model = SimpleNet(input_dim=input_dim, middle_dim=32, output_dim=output_dim)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    
+    # --- 数据预处理 ---
+    states_tensor = torch.FloatTensor(states)
+    actions_tensor = torch.LongTensor(actions).squeeze()
+    
+    dataset = torch.utils.data.TensorDataset(states_tensor, actions_tensor)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    
+    # --- 训练循环 ---
+    print("⏳ 正在训练...")
+    for epoch in range(n_epochs):
+        model.train()
+        total_loss = 0
+        correct = 0
+        total = 0
+        
+        for batch_states, batch_actions in dataloader:
+            optimizer.zero_grad()
+            outputs = model(batch_states)
+            loss = criterion(outputs, batch_actions)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            
+            # 计算准确率
+            _, predicted = torch.max(outputs, 1)
+            total += batch_actions.size(0)
+            correct += (predicted == batch_actions).sum().item()
+        
+        avg_loss = total_loss / len(dataloader)
+        accuracy = 100 * correct / total
+        
+        if (epoch+1) % 10 == 0:
+            print(f"Epoch [{epoch+1}/{n_epochs}], Loss: {avg_loss:.4f}, Acc: {accuracy:.1f}%")
+    
+    # --- 保存模型 ---
+    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+    torch.save(model.state_dict(), model_save_path)
+    print(f"✅ 模型已保存至: {os.path.abspath(model_save_path)}")
+    
+    return model
